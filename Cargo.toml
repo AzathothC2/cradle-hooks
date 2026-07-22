@@ -1,6 +1,6 @@
 [package]
 name = "cradle-hooks"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "The cradle workspace's function hooking logic"
 license = "MIT"
@@ -18,3 +18,7 @@ features = [
     "Win32_System_Memory",
     "Win32_System_Kernel"
 ]
+
+[features]
+default = []
+unstable = []

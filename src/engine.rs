@@ -70,6 +70,8 @@ impl HookEngine {
                 ret_value: 0,
                 export_name: &bp.export_name,
                 module_name: &bp.module_name,
+                #[cfg(feature = "unstable")]
+                return_hook: None,
             };
             let action = (bp.handler)(&mut hook_ctx);
             let ret = hook_ctx.ret_value;

@@ -28,6 +28,8 @@ pub struct HookContext<'a> {
     pub export_name: &'a str,
     /// Currently hooked module name
     pub module_name: &'a str,
+    #[cfg(feature = "unstable")]
+    pub(crate) return_hook: Option<unstable::ReturnHookHandler>,
 }
 
 impl<'a> HookContext<'a> {
@@ -116,3 +118,44 @@ impl<'a> HookContext<'a> {
 pub type HookResult = CradleResult<HookAction>;
 /// Hook event handler. This is what gets called when a breakpoint is triggered
 pub type HookHandler = Box<dyn Fn(&mut HookContext) -> HookResult + Send>;
+
+#[cfg(feature = "unstable")]
+/// Untested and unstable APIs that aren't ready to be released yet
+pub mod unstable {
+    use crate::{HookContext, HookResult};
+
+    /// Context captured when a function-entry hook registers a return hook
+    pub struct ReturnHookContext {
+        /// Module containing the original entry hook
+        pub module_name: String,
+        /// Export name of the original entry hook
+        pub export_name: String,
+        /// Stack pointer at the original function entry
+        pub entry_rsp: u64,
+        /// Expected stack pointer after the hooked function returns
+        pub return_rsp: u64,
+        /// Address that the hooked function is expected to return to
+        pub return_addr: usize,
+    }
+
+    /// One-shot handler called when a function returns to a registered return address
+    pub type ReturnHookHandler =
+        Box<dyn for<'a> FnOnce(&mut HookContext<'a>, &ReturnHookContext) -> HookResult + Send>;
+
+    impl HookContext<'_> {
+        /// Registers a one-shot handler to run when the current hooked function returns
+        pub fn on_return<F>(&mut self, handler: F)
+        where
+            F: for<'a> FnOnce(&mut HookContext<'a>, &ReturnHookContext) -> HookResult
+                + Send
+                + 'static,
+        {
+            self.return_hook = Some(Box::new(handler));
+        }
+        /// Takes the pending return hook, if one was registered by the entry handler
+        #[allow(dead_code)]
+        pub(crate) fn take_rhook(&mut self) -> Option<ReturnHookHandler> {
+            self.return_hook.take()
+        }
+    }
+}
