@@ -3,7 +3,7 @@ use std::ffi::c_void;
 use std::ptr::null_mut;
 use windows_sys::Win32::Foundation::{GetLastError, HANDLE};
 use windows_sys::Win32::System::Diagnostics::Debug::{
-    CONTEXT, CONTEXT_ALL_X86, GetThreadContext, ReadProcessMemory, SetThreadContext,
+    CONTEXT, CONTEXT_ALL_AMD64, GetThreadContext, ReadProcessMemory, SetThreadContext,
     WriteProcessMemory,
 };
 
@@ -20,7 +20,7 @@ pub unsafe fn set_thread_context(thread: HANDLE, ctx: &CONTEXT) -> CradleResult 
 pub unsafe fn get_thread_context(thread: HANDLE) -> CradleResult<CONTEXT> {
     unsafe {
         let mut ctx: CONTEXT = std::mem::zeroed();
-        ctx.ContextFlags = CONTEXT_ALL_X86;
+        ctx.ContextFlags = CONTEXT_ALL_AMD64;
         if GetThreadContext(thread, &mut ctx) == 0 {
             return Err(CradleError::WindowsError(GetLastError() as i32));
         }
@@ -168,4 +168,17 @@ pub fn read_remote<T>(proc: HANDLE, addr: usize) -> CradleResult<T> {
         }
         Ok(val)
     }
+}
+
+pub fn normalize_name(name: &str) -> String {
+    let leaf = name
+        .rsplit('\\')
+        .next()
+        .unwrap_or(name)
+        .rsplit('/')
+        .next()
+        .unwrap_or(name)
+        .trim_end_matches('\0');
+    let lower = leaf.to_ascii_lowercase();
+    lower.strip_suffix(".dll").unwrap_or(&lower).to_string()
 }

@@ -1,8 +1,8 @@
 use crate::breakpoints::{Breakpoint, BreakpointMap, ModuleBaseCache};
 use crate::defs::{HookAction, HookContext, HookHandler};
 use crate::utils::{
-    get_thread_context, read_remote_or, read_single_byte, resolve_export, set_thread_context,
-    write_process_memory, write_single_byte,
+    get_thread_context, normalize_name, read_remote_or, read_single_byte, resolve_export,
+    set_thread_context, write_process_memory, write_single_byte,
 };
 use cradle_shared::{CradleError, CradleResult};
 use windows_sys::Win32::Foundation::HANDLE;
@@ -21,7 +21,12 @@ pub struct HookEngine {
     breakpoints: BreakpointMap,
     module_cache: ModuleBaseCache,
     process: HANDLE,
-    pending_restore: Option<usize>,
+    pending_restore: Option<PendingRestore>,
+}
+
+struct PendingRestore {
+    addr: usize,
+    thread: HANDLE,
 }
 
 impl HookEngine {
@@ -49,7 +54,7 @@ impl HookEngine {
 
     /// Registers a module to hook given its name and base address
     pub fn register_module(&mut self, name: &str, base: usize) {
-        self.module_cache.insert(name.to_lowercase(), base);
+        self.module_cache.insert(normalize_name(name), base);
     }
 
     /// Dispatches a hook on the given handle
@@ -81,7 +86,10 @@ impl HookEngine {
                     ctx.Rip = bp_addr as u64;
                     ctx.EFlags |= 0x100;
                     set_thread_context(thread, &ctx)?;
-                    self.pending_restore = Some(bp_addr);
+                    self.pending_restore = Some(PendingRestore {
+                        addr: bp_addr,
+                        thread,
+                    });
                 }
                 Ok(HookAction::Block(u)) => {
                     let ret_addr: u64 = read_remote_or(self.process, ctx.Rsp as usize, u);
@@ -100,15 +108,19 @@ impl HookEngine {
     ///
     /// # Safety
     /// Calls `WriteProcessMemory` under the hood (via FFI). This may be unsafe
-    pub unsafe fn dispatch_single_step(&mut self) -> CradleResult<DispatchResult> {
+    pub unsafe fn dispatch_single_step(&mut self, thread: HANDLE) -> CradleResult<DispatchResult> {
         match self.pending_restore.take() {
-            Some(addr) => {
-                if self.breakpoints.contains_key(&addr) {
+            Some(restore) if restore.thread == thread => {
+                if self.breakpoints.contains_key(&restore.addr) {
                     unsafe {
-                        write_process_memory(self.process, addr, &[0xCC])?;
+                        write_process_memory(self.process, restore.addr, &[0xCC])?;
                     }
                 }
                 Ok(DispatchResult::Handled)
+            }
+            Some(restore) => {
+                self.pending_restore = Some(restore);
+                Ok(DispatchResult::Skip)
             }
             None => Ok(DispatchResult::Skip),
         }
@@ -130,7 +142,7 @@ impl HookEngine {
                 "module cache is empty".to_owned(),
             ));
         }
-        let module_lower = module.to_lowercase();
+        let module_lower = normalize_name(module);
         let base = self
             .module_cache
             .get(&module_lower)
