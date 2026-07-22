@@ -78,10 +78,21 @@ impl HookEngine {
                 #[cfg(feature = "unstable")]
                 return_hook: None,
             };
-            let action = (bp.handler)(&mut hook_ctx);
+            let mut action = HookAction::Continue;
+            for handler in &bp.handlers {
+                match handler(&mut hook_ctx) {
+                    Ok(HookAction::Continue) => {}
+                    Ok(HookAction::Modify) => action = HookAction::Modify,
+                    Ok(block @ HookAction::Block(_)) => {
+                        action = block;
+                        break;
+                    }
+                    Err(_) => {}
+                }
+            }
             let ret = hook_ctx.ret_value;
             match action {
-                Ok(HookAction::Continue) | Ok(HookAction::Modify) => {
+                HookAction::Continue | HookAction::Modify => {
                     write_process_memory(self.process, bp_addr, &[bp.original_byte])?;
                     ctx.Rip = bp_addr as u64;
                     ctx.EFlags |= 0x100;
@@ -91,14 +102,13 @@ impl HookEngine {
                         thread,
                     });
                 }
-                Ok(HookAction::Block(u)) => {
+                HookAction::Block(u) => {
                     let ret_addr: u64 = read_remote_or(self.process, ctx.Rsp as usize, u);
                     ctx.Rip = ret_addr;
                     ctx.Rsp += 8;
                     ctx.Rax = ret;
                     set_thread_context(thread, &ctx)?;
                 }
-                Err(e) => return Err(e),
             }
             Ok(DispatchResult::Handled)
         }
@@ -149,10 +159,9 @@ impl HookEngine {
             .copied()
             .ok_or_else(|| CradleError::ModuleNotFound(module.to_string()))?;
         let addr = resolve_export(self.process, base, export)?;
-        if self.breakpoints.contains_key(&addr) {
-            return Err(CradleError::InvalidValue(format!(
-                "{module}!{export} already hooked at {addr:#x}",
-            )));
+        if let Some(bp) = self.breakpoints.get_mut(&addr) {
+            bp.push_handler(handler);
+            return Ok(());
         }
         let mut orig = [0u8; 1];
         unsafe {

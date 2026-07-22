@@ -6,8 +6,8 @@ use std::collections::HashMap;
 pub struct Breakpoint {
     /// Original byte of the breakpoint. Used to restore the process after removal of the breakpoint
     pub original_byte: u8,
-    /// Hook handler function. When the breakpoint is called, this is what gets executed
-    pub handler: HookHandler,
+    /// Hook handler functions. When the breakpoint is called, these are executed in registration order
+    pub handlers: Vec<HookHandler>,
     /// Hooked function module name
     pub module_name: String,
     /// Hooked function export name
@@ -19,10 +19,15 @@ impl Breakpoint {
     pub fn new(original_byte: u8, handler: HookHandler, module: String, export: String) -> Self {
         Self {
             original_byte,
-            handler,
+            handlers: vec![handler],
             module_name: module,
             export_name: export,
         }
+    }
+
+    /// Adds a handler to an existing breakpoint
+    pub fn push_handler(&mut self, handler: HookHandler) {
+        self.handlers.push(handler);
     }
 }
 
